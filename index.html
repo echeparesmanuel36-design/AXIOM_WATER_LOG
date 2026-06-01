@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AXIOM_WATER_LOG // Monitor Biométrico de Hidratación</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Urbanist:wght@700;800;900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        /* === CONFIGURACIÓN BIFÁSICA DE VARIABLES FINAS (CONMUTACIÓN DE ESTADO LUMÍNICO) === */
+        [data-theme="dark"] {
+            --bg-base: #050b14;
+            --glass-bg: rgba(10, 20, 38, 0.55);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --card-border: rgba(255, 255, 255, 0.05);
+            --text-main: #f8fafc;
+            --text-muted: #64748b;
+            --liquid-color: #38bdf8;
+            --liquid-wave-bg: rgba(56, 189, 248, 0.4);
+            --bubble-opacity: 0.25;
+        }
+
+        [data-theme="light"] {
+            --bg-base: #f4f8fa;
+            --glass-bg: rgba(255, 255, 255, 0.45);
+            --glass-border: rgba(15, 23, 42, 0.06);
+            --card-bg: rgba(15, 23, 42, 0.02);
+            --card-border: rgba(15, 23, 42, 0.04);
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --liquid-color: #0284c7;
+            --liquid-wave-bg: rgba(2, 132, 199, 0.35);
+            --bubble-opacity: 0.15;
+        }
+
+        /* === RESETEO Y BLINDAJE DE RENDIMIENTO === */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        body, html {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            width: 100%;
+            min-height: 100vh;
+            transition: background-color 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        #water-bubbles-canvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        /* DISEÑO DE CHASIS LIMITADO ESTRICTAMENTE A 480PX PARA MÓVILES */
+        main {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 24px 16px 120px 16px;
+            position: relative;
+        }
+
+        /* COMPONENTES DE CRISTAL LÍQUIDO ULTRA-GLASS */
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.03);
+            border-radius: 24px;
+            padding: 24px;
+            transform: translateZ(0); /* Forzado GPU */
+        }
+
+        .recipient-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+        .recipient-card:active {
+            transform: scale(0.96);
+            background: rgba(56, 189, 248, 0.08);
+        }
+
+        /* === CONTENEDOR HIDRODINÁMICO PROCEDIMENTAL === */
+        .cylinder-container {
+            width: 140px;
+            height: 240px;
+            border: 3px solid var(--text-main);
+            border-radius: 40px;
+            margin: 24px auto;
+            position: relative;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.01);
+            box-shadow: 0 15px 45px rgba(0,0,0,0.05);
+        }
+
+        .liquid-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 0%; /* Controlado dinámicamente */
+            background-color: var(--liquid-color);
+            transition: height 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+
+        /* Renderizado vectorial de olas infinitas */
+        .liquid-fill::before {
+            content: "";
+            position: absolute;
+            width: 200%;
+            height: 200px;
+            top: -190px;
+            left: -50%;
+            background-color: var(--liquid-wave-bg);
+            border-radius: 40%;
+            animation: waveMotion 6s infinite linear;
+        }
+
+        @keyframes waveMotion {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* INPUTS Y PASARELAS PREMIUM */
+        .input-militar {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--card-border);
+            background: var(--card-bg);
+            font-size: 13px;
+            outline: none;
+            color: var(--text-main);
+        }
+
+        .btn-militar-action {
+            width: 100%;
+            padding: 14px;
+            background: var(--text-main);
+            color: var(--bg-base);
+            border: none;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+
+        .btn-oauth {
+            flex: 1;
+            padding: 12px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            font-family: monospace;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-main);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        /* === INTERCEPTOR MODAL PREMIUM CON DESPLAZAMIENTO VERTICAL === */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .modal-card {
+            max-width: 400px;
+            width: 100%;
+            background: var(--glass-bg);
+            backdrop-filter: blur(30px) saturate(190%);
+            border: 1px solid var(--glass-border);
+            border-radius: 28px;
+            padding: 32px 24px;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.15);
+            position: relative;
+            transform: translateY(100px);
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="water-bubbles-canvas"></canvas>
+
+    <main>
+        
+        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="width: 34px; height: 34px; background: var(--text-main); border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--bg-base);">
+                    <i data-lucide="droplet" style="width: 16px; height: 16px;"></i>
+                </div>
+                <div>
+                    <span style="font-family: 'Urbanist', sans-serif; font-weight: 900; font-size: 1.15rem; letter-spacing: -0.5px;">AXIOM_WATER</span>
+                    <p style="font-size: 7px; font-family: monospace; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">v2.0 // hydro cell engine</p>
+                </div>
+            </div>
+            
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <button onclick="toggleDayNightEngine()" style="background: none; border: none; color: var(--text-main); cursor: pointer; padding: 6px;">
+                    <i id="theme-icon-hud" data-lucide="sun" style="width: 18px; height: 18px;"></i>
+                </button>
+                <div id="user-badge-status" style="font-family: monospace; font-size: 9px; font-weight: 700; background: var(--card-bg); border: 1px solid var(--card-border); padding: 4px 10px; border-radius: 20px; color: var(--text-muted);">
+                    INVITADO
+                </div>
+            </div>
+        </header>
+
+        <div class="glass-panel" style="text-align: center; margin-bottom: 16px;">
+            <span style="font-family: monospace; font-size: 10px; color: var(--text-muted); font-weight: bold; letter-spacing: 0.5px;">META DIARIA: 2500ml</span>
+            
+            <div class="cylinder-container">
+                <div class="liquid-fill" id="water-fluid-mesh"></div>
+            </div>
+
+            <h2 id="volumetric-counter-title" style="font-family: 'Urbanist', sans-serif; font-weight: 900; font-size: 2.2rem; letter-spacing: -1px; margin-bottom: 2px;">0 <span style="font-size: 1.2rem; font-weight: 500; color: var(--text-muted);">ml</span></h2>
+            <p id="absorption-rate-text" style="font-size: 11px; font-family: monospace; color: var(--text-muted);">Tasa de hidratación celular: 0% / hora</p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px;">
+            <div class="recipient-card glass-panel" onclick="injectWaterVolume(250)">
+                <i data-lucide="cup-contents" style="width: 18px; height: 18px; margin-bottom: 4px; color: var(--liquid-color);"></i>
+                <p style="font-size: 12px; font-weight: 600;">Taza</p>
+                <span style="font-size: 9px; font-family: monospace; color: var(--text-muted);">250 ml</span>
+            </div>
+            <div class="recipient-card glass-panel" onclick="injectWaterVolume(500)">
+                <i data-lucide="glass-water" style="width: 18px; height: 18px; margin-bottom: 4px; color: var(--liquid-color);"></i>
+                <p style="font-size: 12px; font-weight: 600;">Botella</p>
+                <span style="font-size: 9px; font-family: monospace; color: var(--text-muted);">500 ml</span>
+            </div>
+            <div class="recipient-card glass-panel" onclick="injectWaterVolume(750)">
+                <i data-lucide="beer" style="width: 18px; height: 18px; margin-bottom: 4px; color: var(--liquid-color);"></i>
+                <p style="font-size: 12px; font-weight: 600;">Termo</p>
+                <span style="font-size: 9px; font-family: monospace; color: var(--text-muted);">750 ml</span>
+            </div>
+        </div>
+
+        <div class="glass-panel" style="display: flex; flex-direction: column; gap: 8px;">
+            <button class="btn-militar-action" style="background: var(--card-bg); color: var(--text-main); font-family: monospace; font-size: 11px; padding: 12px; border: 1px solid var(--card-border);" onclick="triggerPremiumGateBlock()">
+                <i data-lucide="calendar-days" style="width: 14px; height: 14px;"></i> Activar Historial Semanal
+            </button>
+            <button id="btn-clear-water" style="background: none; border: none; color: var(--text-muted); font-family: monospace; font-size: 10px; cursor: pointer; padding: 4px; align-self: center;" onclick="resetHydrationEngine()">Reiniciar contador</button>
+        </div>
+
+        <div id="premium-stats-panel" class="glass-panel" style="display: none; margin-top: 16px;">
+            <h4 style="font-family: 'Urbanist', sans-serif; font-weight: 800; font-size: 1rem; margin-bottom: 10px;"><i data-lucide="activity" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px; color: var(--liquid-color);"></i> Telemetría Semanal</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; font-family: monospace;">
+                <div style="background: var(--card-bg); padding: 8px; border-radius: 8px;">Eficiencia Renal: <strong style="color:var(--liquid-color);">99.2%</strong></div>
+                <div style="background: var(--card-bg); padding: 8px; border-radius: 8px;">Balance Perimetral: <strong style="color:var(--liquid-color);">Sincro</strong></div>
+            </div>
+            <button id="btn-logout-water" style="width: 100%; margin-top: 12px; background: transparent; border: none; color: #ef4444; font-family: monospace; font-size: 10px; font-weight: bold; cursor: pointer;" onclick="logoutSessionEngine()">CERRAR CONEXIÓN SEGURA</button>
+        </div>
+
+    </main>
+
+    <div class="modal-overlay" id="premium-modal-gate" onclick="closePremiumModalEngine(event)">
+        <div class="modal-card" id="premium-modal-card">
+            
+            <button onclick="hideConversionModal()" style="position: absolute; top: 16px; right: 16px; background: transparent; border: none; color: var(--text-muted); cursor: pointer;">
+                <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+            </button>
+
+            <div style="text-align: center; margin-bottom: 20px;">
+                <span style="font-family: monospace; font-size: 8px; background: rgba(56,189,248,0.15); color: var(--liquid-color); padding: 4px 10px; border-radius: 6px; font-weight: 700;">PRO-HEALTH LOCK</span>
+                <h3 style="font-family: 'Urbanist', sans-serif; font-size: 1.3rem; font-weight: 900; margin-top: 8px; letter-spacing: -0.3px;">Monitoreo Semanal Continuo</h3>
+                <p style="color: var(--text-muted); font-size: 12px; margin-top: 4px; line-height: 1.4;">Guarda tus objetivos de hidratación celular e introduce recordatorios vinculando tu cuenta gratis.</p>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                <button class="btn-oauth" onclick="executeSupabaseOAuthEngine('google')">
+                    <i data-lucide="chrome" style="width: 13px; height: 13px; color: #ea4335;"></i> Google
+                </button>
+                <button class="btn-oauth" onclick="executeSupabaseOAuthEngine('twitter')">
+                    <i data-lucide="twitter" style="width: 13px; height: 13px; color: #1da1f2;"></i> Cuenta X
+                </button>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px; margin: 12px 0;">
+                <div style="flex: 1; height: 1px; background: var(--card-border);"></div>
+                <span style="font-family: monospace; font-size: 9px; color: var(--text-muted);">O REGISTRO CLÁSICO</span>
+                <div style="flex: 1; height: 1px; background: var(--card-border);"></div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;">
+                <input type="email" id="auth-email" class="input-militar" placeholder="Tu email">
+                <input type="password" id="auth-password" class="input-militar" placeholder="Tu contraseña">
+            </div>
+
+            <div style="display: flex; gap: 10px;">
+                <button class="btn-militar-action" style="flex: 1; background: var(--text-main); color: var(--bg-base);" onclick="executeSupabaseAuth('LOGIN')">LOG IN</button>
+                <button class="btn-militar-action" style="flex: 1; background: transparent; color: var(--text-main); border: 1px solid var(--card-border);" onclick="executeSupabaseAuth('REGISTRO')">ALTA</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === 1. PARÁMETROS CRÍTICOS Y CREDENCIALES FIJAS ===
+        const SUPABASE_URL = "https://vqgkzwnmcibwvfmnayhz.supabase.co";
+        const SUPABASE_ANON_KEY = "sb_publishable_sSj75-J8cNKcyWROx74lRA_f-JvZCJS";
+        
+        let supabaseClient = null;
+        let authenticatedUser = null;
+        
+        let currentWaterVolume = 0;
+        const TARGET_GOAL = 2500;
+
+        // Inicializador de Lenis Scroll
+        const lenis = new Lenis({ duration: 1.2, easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)), smoothWheel: true });
+        function raf(time) { lenis.raf(time); requestAnimationFrame(raf); }
+        requestAnimationFrame(raf);
+
+        // Conexión defensiva con Supabase
+        if (typeof supabase !== 'undefined') {
+            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        }
+
+        // Interceptor automático para capturar accesos OAuth exitosos
+        async function checkActiveSessionEngine() {
+            if (!supabaseClient) return;
+            const { data: { session }, error } = await supabaseClient.auth.getSession();
+            if (session && session.user) {
+                successSessionLoginUnlock(session.user);
+            }
+        }
+
+        // === 2. CANVAS DE PARTICULAS / BURBUJAS PROCEDIMENTALES ===
+        const canvas = document.getElementById('water-bubbles-canvas');
+        const ctx = canvas.getContext('2d');
+        let bubblesArray = [];
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        class Bubble {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = canvas.height + Math.random() * 50;
+                this.size = Math.random() * 3 + 1;
+                this.speed = Math.random() * 1.5 + 0.5;
+            }
+            update() {
+                this.y -= this.speed;
+                if (this.y < -10) {
+                    this.y = canvas.height + 10;
+                    this.x = Math.random() * canvas.width;
+                }
+            }
+            draw() {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                ctx.fillStyle = currentTheme === 'dark' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(2, 132, 199, 0.15)';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function initBubblesEngine() {
+            bubblesArray = [];
+            for (let i = 0; i < 40; i++) { bubblesArray.push(new Bubble()); }
+        }
+
+        function animateBubblesEngine() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            bubblesArray.forEach(b => { b.update(); b.draw(); });
+            requestAnimationFrame(animateBubblesEngine);
+        }
+
+        // === 3. SELECCIÓN DE MODO CLARO / OSCURO (CONMUTACIÓN INMEDIATA) ===
+        function toggleDayNightEngine() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const targetTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', targetTheme);
+            
+            const icon = document.getElementById('theme-icon-hud');
+            if (targetTheme === 'light') {
+                icon.setAttribute('data-lucide', 'moon');
+            } else {
+                icon.setAttribute('data-lucide', 'sun');
+            }
+            lucide.createIcons();
+        }
+
+        // === 4. INYECTOR HIDRODINÁMICO LOCAL (SIMULACIÓN RUST WASM) ===
+        function injectWaterVolume(milliliters) {
+            currentWaterVolume += milliliters;
+            
+            // Limitador estructural de llenado
+            if (currentWaterVolume > TARGET_GOAL) currentWaterVolume = TARGET_GOAL;
+
+            const percentage = (currentWaterVolume / TARGET_GOAL) * 100;
+            
+            // Animación elástica del nivel de agua via DOM
+            document.getElementById('water-fluid-mesh').style.height = `${percentage}%`;
+            document.getElementById('volumetric-counter-title').innerHTML = `${currentWaterVolume} <span style="font-size: 1.2rem; font-weight: 500; color: var(--text-muted);">ml</span>`;
+
+            // Ejecución del algoritmo matemático local (Simulación tasa de absorción celular por hora Rust)
+            let estimatedAbsorpt = (currentWaterVolume / 35).toFixed(1);
+            document.getElementById('absorption-rate-text').innerText = `Tasa de hidratación celular: ${estimatedAbsorpt}% / hora`;
+
+            // Efecto de sacudida y rebote orgánico sobre el contenedor con GSAP
+            gsap.fromTo(".cylinder-container", { scaleY: 0.95 }, { scaleY: 1, duration: 0.4, ease: "elastic.out(1, 0.3)" });
+
+            // Comprobación de hito biométrico completo
+            if (currentWaterVolume >= TARGET_GOAL) {
+                triggerHydroCelebration();
+            }
+        }
+
+        function resetHydrationEngine() {
+            currentWaterVolume = 0;
+            document.getElementById('water-fluid-mesh').style.height = `0%`;
+            document.getElementById('volumetric-counter-title').innerHTML = `0 <span style="font-size: 1.2rem; font-weight: 500; color: var(--text-muted);">ml</span>`;
+            document.getElementById('absorption-rate-text').innerText = `Tasa de hidratación celular: 0% / hora`;
+        }
+
+        // === 5. GESTIÓN DEL INTERCEPTOR SOCIAL Y MODAL (SUPABASE EDGE FLUID) ===
+        function triggerPremiumGateBlock() {
+            if (!authenticatedUser) {
+                showConversionModal();
+            } else {
+                alert("Extrayendo telemetría semanal en caché distribuida Vercel Edge... ¡Historial al día!");
+            }
+        }
+
+        function showConversionModal() {
+            const overlay = document.getElementById('premium-modal-gate');
+            const card = document.getElementById('premium-modal-card');
+            overlay.style.display = 'flex';
+            gsap.to(overlay, { opacity: 1, duration: 0.2 });
+            gsap.to(card, { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" });
+        }
+
+        function hideConversionModal() {
+            const overlay = document.getElementById('premium-modal-gate');
+            const card = document.getElementById('premium-modal-card');
+            gsap.to(card, { y: 60, opacity: 0, duration: 0.2, ease: "power3.in" });
+            gsap.to(overlay, { opacity: 0, duration: 0.2, onComplete: () => { overlay.style.display = 'none'; } });
+        }
+
+        function closePremiumModalEngine(e) {
+            if(e.target === document.getElementById('premium-modal-gate')) hideConversionModal();
+        }
+
+        // === 6. AUTENTICACIÓN CON SUPABASE AUTH ===
+        async function executeSupabaseAuth(actionType) {
+            const email = document.getElementById('auth-email').value.trim();
+            const password = document.getElementById('auth-password').value.trim();
+
+            if (!email || !password) {
+                alert("Completa tus campos de acceso.");
+                return;
+            }
+
+            try {
+                let responseData;
+                if (actionType === 'REGISTRO') {
+                    responseData = await supabaseClient.auth.signUp({ email, password });
+                    if (responseData.error) throw responseData.error;
+                    alert("Enlace enviado. Confirma tu registro en tu casilla de email.");
+                } else {
+                    responseData = await supabaseClient.auth.signInWithPassword({ email, password });
+                    if (responseData.error) throw responseData.error;
+                }
+
+                if (responseData.data && responseData.data.user) {
+                    successSessionLoginUnlock(responseData.data.user);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+        async function executeSupabaseOAuthEngine(providerName) {
+            try {
+                const { error } = await supabaseClient.auth.signInWithOAuth({
+                    provider: providerName,
+                    options: { redirectTo: window.location.origin }
+                });
+                if (error) throw error;
+            } catch (error) {
+                alert(`Error en OAuth: ${error.message}`);
+            }
+        }
+
+        function successSessionLoginUnlock(user) {
+            authenticatedUser = user;
+            hideConversionModal();
+
+            // Mudar la interfaz a modo Premium
+            const badge = document.getElementById('user-badge-status');
+            badge.innerText = "PREMIUM CLOUD";
+            badge.style.color = "var(--liquid-color)";
+            badge.style.borderColor = "var(--liquid-color)";
+
+            document.getElementById('premium-stats-panel').style.display = 'block';
+            gsap.from("#premium-stats-panel", { opacity: 0, y: 15, duration: 0.4 });
+            
+            triggerHydroCelebration();
+        }
+
+        function logoutSessionEngine() {
+            if (supabaseClient) supabaseClient.auth.signOut();
+            authenticatedUser = null;
+            
+            const badge = document.getElementById('user-badge-status');
+            badge.innerText = "INVITADO";
+            badge.style.color = "var(--text-muted)";
+            badge.style.borderColor = "var(--card-border)";
+
+            document.getElementById('premium-stats-panel').style.display = 'none';
+            resetHydrationEngine();
+        }
+
+        // === 7. CELEBRACIÓN BIOMÉTRICA (PALETA CIAN, TURQUESA Y PLATA) ===
+        function triggerHydroCelebration() {
+            let duration = 2 * 1000;
+            let end = Date.now() + duration;
+
+            (function frame() {
+                confetti({ particleCount: 6, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#38bdf8', '#0ea5e9', '#06b6d4', '#cbd5e1'] });
+                confetti({ particleCount: 6, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#38bdf8', '#0ea5e9', '#06b6d4', '#cbd5e1'] });
+                if (Date.now() < end) requestAnimationFrame(frame);
+            }());
+        }
+
+        // Inicialización coordinada
+        window.addEventListener('DOMContentLoaded', () => {
+            checkActiveSessionEngine();
+            initBubblesEngine();
+            animateBubblesEngine();
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>
